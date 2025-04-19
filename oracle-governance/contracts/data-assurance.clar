@@ -10,6 +10,9 @@
 (define-constant ERR-INSUFFICIENT-STAKE-FUNDS (err u3))
 (define-constant ERR-PROVIDER-REGISTRATION-EXISTS (err u4))
 (define-constant ERR-DATA-EXPIRED (err u5))
+(define-constant ERR-INVALID-PROPOSAL-TYPE (err u6))
+(define-constant ERR-INVALID-PARAMETER-VALUE (err u7))
+(define-constant ERR-INVALID-HEIGHT-VALUE (err u8))
 
 ;; Data Maps
 ;; Oracle provider information storage
@@ -68,6 +71,18 @@
 ;; Block height simulation for testing
 (define-data-var simulated-block-height uint u0)
 
+;; Valid proposal types
+(define-map valid-proposal-types 
+  (string-ascii 50) 
+  bool
+)
+
+;; Initialize valid proposal types
+(map-set valid-proposal-types "change-min-stake" true)
+(map-set valid-proposal-types "adjust-reputation" true)
+(map-set valid-proposal-types "modify-rewards" true)
+(map-set valid-proposal-types "update-expiry" true)
+
 ;; Read-Only Functions
 ;; Retrieve oracle data by key
 (define-read-only (get-oracle-data (data-identifier (string-ascii 50)))
@@ -77,6 +92,11 @@
 ;; Get current simulated block height
 (define-read-only (get-current-block-height)
   (var-get simulated-block-height)
+)
+
+;; Check if proposal type is valid
+(define-read-only (is-valid-proposal-type (proposal-type (string-ascii 50)))
+  (default-to false (map-get? valid-proposal-types proposal-type))
 )
 
 ;; Provider Management Functions
@@ -145,6 +165,24 @@
   (begin
     ;; Restrict proposal creation to contract owner
     (asserts! (is-eq tx-sender contract-owner) ERR-UNAUTHORIZED-ACCESS)
+    
+    ;; Validate proposal type
+    (asserts! (is-valid-proposal-type proposal-type) ERR-INVALID-PROPOSAL-TYPE)
+    
+    ;; Validate parameter value based on proposal type
+    (asserts! 
+      (if (is-eq proposal-type "change-min-stake")
+        (> parameter-value u0)  ;; Min stake must be positive
+        (if (is-eq proposal-type "adjust-reputation")
+          (<= parameter-value u1000)  ;; Max reputation score is 1000
+          (if (is-eq proposal-type "modify-rewards")
+            (<= parameter-value u100)  ;; Max reward percentage is 100
+            (< parameter-value u10000)  ;; Expiry blocks under 10000
+          )
+        )
+      )
+      ERR-INVALID-PARAMETER-VALUE
+    )
 
     ;; Record new proposal
     (map-set governance-proposals proposal-id {
@@ -233,6 +271,9 @@
 ;; Set specific block height for testing
 (define-public (set-simulated-block-height (height-value uint))
   (begin
+    ;; Add validation to ensure height-value is within reasonable bounds
+    (asserts! (< height-value u1000000) ERR-INVALID-HEIGHT-VALUE)
+    
     (var-set simulated-block-height height-value)
     (ok true)
   )
